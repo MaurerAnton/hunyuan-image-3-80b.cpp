@@ -1,0 +1,14 @@
+build/
+weights/
+gguf/
+test_output/
+test_full/
+test_components/
+*.safetensors
+*.gguf
+*.o
+*.so
+*.a
+.DS_Store
+__pycache__/
+*.pyc
