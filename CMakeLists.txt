@@ -4,8 +4,8 @@ project(hunyuan.cpp LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
-# ggml library path (from stable-diffusion.cpp submodule)
-set(GGML_DIR /home/bym/llama/stable-diffusion.cpp/ggml)
+# ggml library path (use local submodule)
+set(GGML_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ggml)
 
 # Build ggml as a static library
 add_subdirectory(${GGML_DIR} ${CMAKE_BINARY_DIR}/ggml)
