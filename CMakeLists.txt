@@ -22,6 +22,8 @@ add_executable(hunyuan_test
     src/hunyuan_gguf_loader.cpp
     src/hunyuan_image_gen.cpp
     src/hunyuan_vae.cpp
+    src/hunyuan_moe_full.cpp
+    src/hunyuan_extended.cpp
 )
 
 target_include_directories(hunyuan_test PRIVATE
