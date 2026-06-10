@@ -343,7 +343,6 @@ void topkgating_full(
     delete[] token_priority;
     delete[] tp_reshaped;
     delete[] tp_max;
-    delete[] gates;
 }
 
 // ============================================================

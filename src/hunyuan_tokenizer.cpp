@@ -58,61 +58,46 @@ float HunyuanTokenizer::json_extract_float(const std::string& j, size_t& p) {
 // ============================================================
 
 bool HunyuanTokenizer::parse_tokenizer_json(const std::string& j) {
+    // Single-pass: scan for "vocab" and "merges" objects
+    // Vocab: {"token": id, ...} — key is string, value is int
+    // Merges: ["tok1 tok2", ...]
+    
     size_t p = 0;
     
-    // Find "added_tokens" array
-    p = j.find("\"added_tokens\"");
+    // Find "vocab":{...}
+    p = j.find("\"vocab\"");
     if (p != std::string::npos) {
-        p = j.find('[', p);
-        p++;
-        while (p < j.size() && j[p] != ']') {
-            if (j[p] == '{') {
-                BPEToken tok;
-                p++; // skip {
-                while (p < j.size() && j[p] != '}') {
-                    std::string key = json_extract_string(j, p);
-                    json_skip_whitespace(j, p);
-                    if (p < j.size() && j[p] == ':') p++;
-                    if (key == "id") tok.id = json_extract_int(j, p);
-                    else if (key == "content") tok.text = json_extract_string(j, p);
-                    else if (key == "special") { bool s = (json_extract_string(j, p) == "true" || j[p-4] == 't'); tok.type = s ? 2 : 1; }
-                    else json_skip_value(j, p);
-                    json_skip_whitespace(j, p);
-                    if (p < j.size() && j[p] == ',') p++;
+        p = j.find('{', p);
+        if (p != std::string::npos) {
+            p++; // enter {
+            while (p < j.size()) {
+                // Skip whitespace and commas
+                while (p < j.size() && (j[p] == ' ' || j[p] == '\n' || j[p] == '\r' || j[p] == '\t' || j[p] == ',')) p++;
+                if (p >= j.size() || j[p] == '}') break;
+                
+                // Read key string
+                if (j[p] != '"') break;
+                p++; // skip opening quote
+                std::string token_text;
+                while (p < j.size() && j[p] != '"') {
+                    if (j[p] == '\\') { p++; if (p < j.size()) token_text += j[p]; }
+                    else token_text += j[p];
+                    p++;
                 }
-                p++; // skip }
-                // Store
-                if (tok.id >= 0 && !tok.text.empty()) {
-                    if ((size_t)tok.id >= vocab_.size()) vocab_.resize(tok.id + 1);
-                    vocab_[tok.id] = tok;
-                    token_to_id_[tok.text] = tok.id;
+                if (p < j.size()) p++; // skip closing quote
+                
+                // Skip whitespace and colon
+                while (p < j.size() && (j[p] == ' ' || j[p] == '\n' || j[p] == '\t' || j[p] == ':')) p++;
+                
+                // Read value (integer)
+                int32_t id = 0;
+                while (p < j.size() && j[p] >= '0' && j[p] <= '9') {
+                    id = id * 10 + (j[p] - '0');
+                    p++;
                 }
-            }
-            json_skip_whitespace(j, p);
-            if (p < j.size() && j[p] == ',') p++;
-        }
-    }
-    
-    // Find "model" → "vocab" object
-    p = j.find("\"model\"");
-    if (p == std::string::npos) return !vocab_.empty();
-    p = j.find('{', p); p++;
-    
-    // "vocab" is inside "model"
-    p = j.find("\"vocab\"", p);
-    if (p != std::string::npos) {
-        p = j.find('{', p); p++;
-        while (p < j.size() && j[p] != '}') {
-            std::string token_text = json_extract_string(j, p);
-            json_skip_whitespace(j, p);
-            if (p < j.size() && j[p] == ':') p++;
-            int32_t id = json_extract_int(j, p);
-            json_skip_whitespace(j, p);
-            if (p < j.size() && j[p] == ',') p++;
-            
-            if (id >= 0 && !token_text.empty()) {
-                if ((size_t)id >= vocab_.size()) vocab_.resize(id + 1);
-                if (vocab_[id].text.empty()) {
+                
+                if (!token_text.empty() && id >= 0) {
+                    if ((size_t)id >= vocab_.size()) vocab_.resize(id + 1);
                     vocab_[id].id = id;
                     vocab_[id].text = token_text;
                     vocab_[id].type = 1;
@@ -122,24 +107,58 @@ bool HunyuanTokenizer::parse_tokenizer_json(const std::string& j) {
         }
     }
     
-    // Find "merges" array
+    // Find "merges":[...]
     p = j.find("\"merges\"");
     if (p != std::string::npos) {
-        p = j.find('[', p); p++;
-        int32_t rank = 0;
-        while (p < j.size() && j[p] != ']') {
-            std::string merge_str = json_extract_string(j, p);
-            json_skip_whitespace(j, p);
-            if (p < j.size() && j[p] == ',') p++;
-            
-            if (!merge_str.empty()) {
-                // Merge format: "tok1 tok2"
-                size_t space = merge_str.find(' ');
-                if (space != std::string::npos) {
-                    std::string t1 = merge_str.substr(0, space);
-                    std::string t2 = merge_str.substr(space + 1);
-                    merges_.push_back({t1, t2});
-                    merge_ranks_[merge_str] = rank++;
+        p = j.find('[', p);
+        if (p != std::string::npos) {
+            p++; // enter [
+            int32_t rank = 0;
+            while (p < j.size()) {
+                while (p < j.size() && (j[p] == ' ' || j[p] == '\n' || j[p] == '\r' || j[p] == '\t' || j[p] == ',')) p++;
+                if (p >= j.size() || j[p] == ']') break;
+                
+                // Expect inner array: ["tok1", "tok2"]
+                if (j[p] == '[') {
+                    p++; // skip [
+                    
+                    // Read first string
+                    while (p < j.size() && j[p] != '"') p++;
+                    if (p >= j.size()) break;
+                    p++;
+                    std::string tok1;
+                    while (p < j.size() && j[p] != '"') {
+                        if (j[p] == '\\') { p++; if (p < j.size()) tok1 += j[p]; }
+                        else tok1 += j[p];
+                        p++;
+                    }
+                    if (p < j.size()) p++;
+                    
+                    // Skip comma
+                    while (p < j.size() && j[p] != '"' && j[p] != ']') p++;
+                    
+                    // Read second string
+                    if (p < j.size() && j[p] == '"') {
+                        p++;
+                        std::string tok2;
+                        while (p < j.size() && j[p] != '"') {
+                            if (j[p] == '\\') { p++; if (p < j.size()) tok2 += j[p]; }
+                            else tok2 += j[p];
+                            p++;
+                        }
+                        if (p < j.size()) p++;
+                        
+                        if (!tok1.empty() && !tok2.empty()) {
+                            merges_.push_back({tok1, tok2});
+                            merge_ranks_[tok1 + " " + tok2] = rank++;
+                        }
+                    }
+                    
+                    // Skip to end of inner array
+                    while (p < j.size() && j[p] != ']') p++;
+                    if (p < j.size()) p++; // skip ]
+                } else {
+                    break;
                 }
             }
         }
@@ -167,57 +186,45 @@ bool HunyuanTokenizer::load(const std::string& path) {
 std::vector<std::string> HunyuanTokenizer::pretokenize(const std::string& text) const {
     std::vector<std::string> words;
     
-    // GPT-2 pattern: contractions, letters, numbers, punctuation, whitespace
-    // Pattern: 's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+
-    
-    // Simplified implementation using character-by-character scanning
+    // GPT-2 regex equivalent: split on patterns
+    // Simplified: split on whitespace, preserving spaces as prefix
     size_t i = 0;
     while (i < text.size()) {
-        // Skip whitespace at start of word, handle separately
-        if (isspace(text[i])) {
-            size_t start = i;
-            while (i < text.size() && isspace(text[i])) i++;
-            words.push_back(text.substr(start, i - start));
-            continue;
+        // Collect leading whitespace
+        size_t space_start = i;
+        while (i < text.size() && isspace(text[i])) i++;
+        std::string spaces = text.substr(space_start, i - space_start);
+        
+        if (i >= text.size()) {
+            // Trailing whitespace
+            if (!spaces.empty()) words.push_back(spaces);
+            break;
         }
         
-        // Check for contractions
-        if (i + 2 < text.size() && text[i] == '\'' && 
-            ((text[i+1] == 's' && (i+2 >= text.size() || !isalpha(text[i+2]))) ||
-             (text[i+1] == 't' && (i+2 >= text.size() || !isalpha(text[i+2]))) ||
-             (text[i+1] == 'm' && (i+2 >= text.size() || !isalpha(text[i+2]))) ||
-             (text[i+1] == 'd' && (i+2 >= text.size() || !isalpha(text[i+2]))))) {
-            words.push_back(text.substr(i, 2));
-            i += 2;
-            continue;
-        }
-        if (i + 3 < text.size() && text[i] == '\'' &&
-            ((text.substr(i, 3) == "'re") || (text.substr(i, 3) == "'ve") || (text.substr(i, 3) == "'ll")) &&
-            (i+3 >= text.size() || !isalpha(text[i+3]))) {
-            words.push_back(text.substr(i, 3));
-            i += 3;
-            continue;
-        }
-        
-        // Letters
-        if (isalpha(text[i])) {
-            size_t start = i;
-            while (i < text.size() && isalpha(text[i])) i++;
-            words.push_back(text.substr(start, i - start));
-            continue;
-        }
-        
-        // Digits
-        if (isdigit(text[i])) {
-            size_t start = i;
+        // Collect word (letters/digits/punctuation)
+        size_t word_start = i;
+        if (isalpha(text[i]) || text[i] >= 0x80) {
+            while (i < text.size() && (isalpha(text[i]) || text[i] >= 0x80)) i++;
+        } else if (isdigit(text[i])) {
             while (i < text.size() && isdigit(text[i])) i++;
-            words.push_back(text.substr(start, i - start));
-            continue;
+        } else {
+            // Single punctuation
+            i++;
         }
+        std::string word = text.substr(word_start, i - word_start);
         
-        // Single punctuation/other
-        words.push_back(text.substr(i, 1));
-        i++;
+        // GPT-2 style: space is prefixed to the word using 'Ġ' (U+0120)
+        // 'Ġ' represents a space in GPT-2 tokenizer convention
+        if (!spaces.empty()) {
+            // Last space becomes 'Ġ' prefix, preceding spaces become separate tokens
+            if (spaces.size() > 1) {
+                for (size_t s = 0; s < spaces.size() - 1; s++)
+                    words.push_back("Ġ");
+            }
+            words.push_back("Ġ" + word);
+        } else {
+            words.push_back(word);
+        }
     }
     
     return words;
@@ -327,7 +334,16 @@ std::string HunyuanTokenizer::decode(const std::vector<int32_t>& ids, bool skip_
         if (skip_special && (id == bos_token_id_ || id == eos_token_id_ || id == pad_token_id_))
             continue;
         if (id >= 0 && (size_t)id < vocab_.size() && !vocab_[id].text.empty()) {
-            result += vocab_[id].text;
+            std::string t = vocab_[id].text;
+            // Convert 'Ġ' back to space
+            for (size_t c = 0; c < t.size(); c++) {
+                if ((unsigned char)t[c] == 0xC4 && c+1 < t.size() && (unsigned char)t[c+1] == 0xA0) {
+                    result += ' ';
+                    c++; // skip second byte of UTF-8 Ġ
+                } else {
+                    result += t[c];
+                }
+            }
         }
     }
     return result;
