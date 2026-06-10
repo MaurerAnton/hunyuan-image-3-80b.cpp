@@ -34,6 +34,21 @@ target_include_directories(hunyuan_test PRIVATE
     src/
 )
 
+# Image gen component test
+add_executable(test_image_gen
+    src/test_image_gen.cpp
+    src/hunyuan_image_gen.cpp
+    src/rms_norm.cpp
+    src/hunyuan_model.cpp
+)
+
+target_include_directories(test_image_gen PRIVATE
+    ${GGML_DIR}/include
+    src/
+)
+
+target_link_libraries(test_image_gen PRIVATE ggml)
+
 target_link_libraries(hunyuan_test PRIVATE ggml)
 
 # Python reference test script stays as script, not compiled
