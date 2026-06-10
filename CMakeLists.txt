@@ -24,6 +24,9 @@ add_executable(hunyuan_test
     src/hunyuan_vae.cpp
     src/hunyuan_moe_full.cpp
     src/hunyuan_extended.cpp
+    src/hunyuan_tokenizer.cpp
+    src/hunyuan_vit.cpp
+    src/hunyuan_patches.cpp
 )
 
 target_include_directories(hunyuan_test PRIVATE
